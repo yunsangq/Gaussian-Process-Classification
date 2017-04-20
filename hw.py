@@ -168,12 +168,7 @@ class GaussianProcessMultiClassifier:
         a = np.zeros((c, n))
         while True:
             b, K, logdet = self.calculate_intermediate_values(t, a, Kcs)
-            a = np.dot(b[3], b[1])
-            objective = -1/2*np.dot(b[1].T, a) + np.dot(t.T, a) - np.sum(np.log(np.sum(np.exp(a), axis=0)))
-            Z = np.sum(objective - b[2])
-            print(Z)
-            if Z == 0:
-                break
+            break
         ############
 
         return a, Z # Do not modify this line.
@@ -189,6 +184,29 @@ class GaussianProcessMultiClassifier:
 
         ############
         pi = self.softmax(a)
+        K = self.block_diag(Kcs)
+
+        logdet = 0.0
+        Ecs = []
+        prob = []
+        for cls in range(c):
+            Dc = np.diag(pi[cls])
+            prob.append(Dc)
+            L = np.linalg.cholesky(np.identity(n) + np.dot(np.dot(np.sqrt(Dc), Kcs[cls]), np.sqrt(Dc)))
+            Ecs.append(np.dot(np.sqrt(Dc), np.linalg.solve(L.T, np.linalg.solve(L, np.sqrt(Dc)))))
+            logdet += np.sum(np.log(np.diag(L)))
+
+        Ecsum = np.zeros((100, 100))
+        for cls in range(c):
+            Ecsum += Ecs[cls]
+        M = np.linalg.cholesky(Ecsum)
+        E = self.block_diag(Ecs)
+        logdet += np.sum(np.log(np.diag(M)))
+        prob = np.concatenate(prob)
+
+
+
+        '''
         E = []
         logdet = 0.0
         PPi = []
@@ -229,6 +247,7 @@ class GaussianProcessMultiClassifier:
         #b = cc - d + spsl.spsolve(np.dot(np.dot(E, R), M.T), spsl.spsolve(M, np.dot(R.T, d)).reshape((c, -1)))
         tmp = E - np.dot(np.dot(np.dot(np.dot(E, R), np.linalg.inv(Esum)), R.T), E)
         b = np.dot(tmp, cc)
+        '''
         ############
 
         # Do not modify below lines.
