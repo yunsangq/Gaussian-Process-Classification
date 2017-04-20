@@ -1,6 +1,7 @@
 import numpy as np
 import scipy as sp
 import scipy.linalg as splinalg
+import scipy.sparse.linalg as spsl
 import sys
 
 
@@ -164,7 +165,15 @@ class GaussianProcessMultiClassifier:
         Read pdf file.
         """
         ############
-        pass
+        a = np.zeros((c, n))
+        while True:
+            b, K, logdet = self.calculate_intermediate_values(t, a, Kcs)
+            a = np.dot(b[3], b[1])
+            objective = -1/2*np.dot(b[1].T, a) + np.dot(t.T, a) - np.sum(np.log(np.sum(np.exp(a), axis=0)))
+            Z = np.sum(objective - b[2])
+            print(Z)
+            if Z == 0:
+                break
         ############
 
         return a, Z # Do not modify this line.
@@ -179,7 +188,47 @@ class GaussianProcessMultiClassifier:
         c = len(self.legalLabels)
 
         ############
-        pass
+        pi = self.softmax(a)
+        E = []
+        logdet = 0.0
+        PPi = []
+        K = self.block_diag(Kcs)
+        D = []
+        _a = []
+        _pi = []
+        for cls in range(c):
+            Dc = np.diag(pi[cls])
+
+            PPi.append(Dc)
+            D.append(pi[cls])
+            _a.append(a[cls])
+            _pi.append(pi[cls])
+
+            L = np.linalg.cholesky(np.identity(n) + np.sqrt(Dc) * Kcs[cls] * np.sqrt(Dc))
+            E.append(np.sqrt(Dc) * spsl.spsolve(L.T, spsl.spsolve(L, np.sqrt(Dc))))
+            logdet += np.sum(np.log(np.diag(L)))
+        E = np.asarray(E)
+        Ecs = E
+        Esum = np.sum(E, axis=0)
+        M = np.linalg.cholesky(np.sum(E, axis=0))
+        logdet += np.sum(np.log(np.diag(M)))
+
+        PPi = np.concatenate(PPi)
+        D = np.diag(np.concatenate(D))
+        _a = np.concatenate(_a)
+        _pi = np.concatenate(_pi)
+        E = self.block_diag(E)
+
+        # a^new = (K^-1 + W)^-1 * (Wa + t - pi)
+        # (Wa + t - pi)
+        W = D - np.dot(PPi, PPi.T)
+        cc = np.dot((D - np.dot(PPi, PPi.T)), _a) + t - _pi
+        R = np.dot(np.linalg.inv(D), PPi)
+        # (k^-1 + W)^-1 = K - K(K + W^-1)^-1*K
+        # d = np.dot(np.dot(E, K), cc)
+        #b = cc - d + spsl.spsolve(np.dot(np.dot(E, R), M.T), spsl.spsolve(M, np.dot(R.T, d)).reshape((c, -1)))
+        tmp = E - np.dot(np.dot(np.dot(np.dot(E, R), np.linalg.inv(Esum)), R.T), E)
+        b = np.dot(tmp, cc)
         ############
 
         # Do not modify below lines.
