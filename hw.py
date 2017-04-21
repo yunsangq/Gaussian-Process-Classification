@@ -1,7 +1,6 @@
 import numpy as np
 import scipy as sp
 import scipy.linalg as splinalg
-import scipy.sparse.linalg as spsl
 import sys
 
 
@@ -177,8 +176,8 @@ class GaussianProcessMultiClassifier:
             _a = np.exp(a.reshape(c, n).T)
             log_sum = np.log(_a.sum(axis=1)).sum()
             objective = -0.5*np.dot(b.T, a) + np.dot(t.T, a) - log_sum
-            # print(abs(objective-converge))
-            if abs(objective-converge) < 0.01:
+            print(abs(objective-converge))
+            if abs(objective-converge) < 1e-5:
                 break
             else:
                 converge = objective
@@ -217,6 +216,7 @@ class GaussianProcessMultiClassifier:
             Ecs.append(Ec)
             _M += Ec
             logdet += np.sum(np.log(np.diag(L)))
+            logdet += np.sum(np.diag(L))
         M = np.linalg.cholesky(_M)
         E = self.block_diag(Ecs)
         logdet += np.sum(np.log(np.diag(M)))
@@ -224,7 +224,7 @@ class GaussianProcessMultiClassifier:
         prob = np.concatenate(prob)
 
         W = D - np.dot(prob, prob.T)
-        R = np.linalg.solve(np.linalg.inv(D), prob)
+        R = np.dot(np.linalg.inv(D), prob)
         _c = np.dot(W, a) + t - pi
         d = np.dot(np.dot(E, K), _c)
         b = _c - d + np.dot(E, np.dot(R, np.linalg.solve(M.T, np.linalg.solve(M, np.dot(R.T, d)))))
@@ -263,11 +263,10 @@ class GaussianProcessMultiClassifier:
             mu.append(np.dot((tc[:, cls] - pi_c[:, cls]).T, kns[cls]))
             f = np.dot(Ecs[cls], kns[cls])
             g = np.dot(Ecs[cls], np.dot(Rcs[cls], np.linalg.solve(M.T, np.linalg.solve(M, np.dot(Rcs[cls].T, f)))))
-            '''
+
             for _cls in range(c):
                 sigma[cls][_cls] = np.dot(g.T, kns[_cls])
-            '''
-            sigma[cls, :] = np.dot(kns, g)
+
             sigma[cls][cls] += knns[cls] - np.dot(f.T, kns[cls])
         mu = np.array(mu)
         ############
