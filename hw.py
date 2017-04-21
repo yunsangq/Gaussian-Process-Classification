@@ -165,12 +165,25 @@ class GaussianProcessMultiClassifier:
         Read pdf file.
         """
         ############
-        a = np.zeros((c, n))
+        t = t[:, 0]
+        a = np.zeros(c*n)
+        converge = -np.inf
         while True:
-            b, K, logdet = self.calculate_intermediate_values(t, a, Kcs)
-            break
+            valuesForModes, valuesForDerivatives, valuesForPrediction = self.calculate_intermediate_values(t, a, Kcs)
+            b = valuesForModes[1]
+            K = valuesForModes[3]
+            logdet = valuesForModes[2]
+            a = np.dot(K, b)
+            _a = np.exp(a.reshape(c, n).T)
+            log_sum = np.log(_a.sum(axis=1)).sum()
+            objective = -0.5*np.dot(b.T, a) + np.dot(t.T, a) - log_sum
+            # print(abs(objective-converge))
+            if abs(objective-converge) < 0.01:
+                break
+            else:
+                converge = objective
         ############
-
+        Z = objective - logdet
         return a, Z # Do not modify this line.
 
     def calculate_intermediate_values(self, t, a, Kcs):
@@ -183,71 +196,38 @@ class GaussianProcessMultiClassifier:
         c = len(self.legalLabels)
 
         ############
-        pi = self.softmax(a)
+        _a = a.reshape(c, n)
+        pi_c = np.exp(_a - np.amax(_a, axis=0))
+        pi_c = pi_c/pi_c.sum(axis=0)
+        pi = pi_c.reshape(c*n)
+        pi_c = pi_c.T
+
         K = self.block_diag(Kcs)
+        D = np.diag(pi)
 
         logdet = 0.0
         Ecs = []
+        _M = np.zeros((n, n))
         prob = []
         for cls in range(c):
-            Dc = np.diag(pi[cls])
+            Dc = np.diag(pi_c[:, cls])
             prob.append(Dc)
-            L = np.linalg.cholesky(np.identity(n) + np.dot(np.dot(np.sqrt(Dc), Kcs[cls]), np.sqrt(Dc)))
-            Ecs.append(np.dot(np.sqrt(Dc), np.linalg.solve(L.T, np.linalg.solve(L, np.sqrt(Dc)))))
+            L = np.linalg.cholesky(np.identity(n) + np.dot(np.sqrt(Dc), np.dot(Kcs[cls], np.sqrt(Dc))))
+            Ec = np.dot(np.sqrt(Dc), np.linalg.solve(L.T, np.linalg.solve(L, np.sqrt(Dc))))
+            Ecs.append(Ec)
+            _M += Ec
             logdet += np.sum(np.log(np.diag(L)))
-
-        Ecsum = np.zeros((100, 100))
-        for cls in range(c):
-            Ecsum += Ecs[cls]
-        M = np.linalg.cholesky(Ecsum)
+        M = np.linalg.cholesky(_M)
         E = self.block_diag(Ecs)
         logdet += np.sum(np.log(np.diag(M)))
+
         prob = np.concatenate(prob)
 
-
-
-        '''
-        E = []
-        logdet = 0.0
-        PPi = []
-        K = self.block_diag(Kcs)
-        D = []
-        _a = []
-        _pi = []
-        for cls in range(c):
-            Dc = np.diag(pi[cls])
-
-            PPi.append(Dc)
-            D.append(pi[cls])
-            _a.append(a[cls])
-            _pi.append(pi[cls])
-
-            L = np.linalg.cholesky(np.identity(n) + np.sqrt(Dc) * Kcs[cls] * np.sqrt(Dc))
-            E.append(np.sqrt(Dc) * spsl.spsolve(L.T, spsl.spsolve(L, np.sqrt(Dc))))
-            logdet += np.sum(np.log(np.diag(L)))
-        E = np.asarray(E)
-        Ecs = E
-        Esum = np.sum(E, axis=0)
-        M = np.linalg.cholesky(np.sum(E, axis=0))
-        logdet += np.sum(np.log(np.diag(M)))
-
-        PPi = np.concatenate(PPi)
-        D = np.diag(np.concatenate(D))
-        _a = np.concatenate(_a)
-        _pi = np.concatenate(_pi)
-        E = self.block_diag(E)
-
-        # a^new = (K^-1 + W)^-1 * (Wa + t - pi)
-        # (Wa + t - pi)
-        W = D - np.dot(PPi, PPi.T)
-        cc = np.dot((D - np.dot(PPi, PPi.T)), _a) + t - _pi
-        R = np.dot(np.linalg.inv(D), PPi)
-        # (k^-1 + W)^-1 = K - K(K + W^-1)^-1*K
-        # d = np.dot(np.dot(E, K), cc)
-        #b = cc - d + spsl.spsolve(np.dot(np.dot(E, R), M.T), spsl.spsolve(M, np.dot(R.T, d)).reshape((c, -1)))
-        tmp = E - np.dot(np.dot(np.dot(np.dot(E, R), np.linalg.inv(Esum)), R.T), E)
-        b = np.dot(tmp, cc)
-        '''
+        W = D - np.dot(prob, prob.T)
+        R = np.linalg.solve(np.linalg.inv(D), prob)
+        _c = np.dot(W, a) + t - pi
+        d = np.dot(np.dot(E, K), _c)
+        b = _c - d + np.dot(E, np.dot(R, np.linalg.solve(M.T, np.linalg.solve(M, np.dot(R.T, d)))))
         ############
 
         # Do not modify below lines.
@@ -263,7 +243,33 @@ class GaussianProcessMultiClassifier:
         Read pdf file.
         """
         ############
-        pass
+        n, d = self.trainingShape
+        c = len(self.legalLabels)
+        X = np.vstack((self.trainingData, datum))
+
+        Ks = self.calculate_covariance(X, self.hyp)
+        kns = []
+        knns = []
+        for cls in range(c):
+            kns.append(Ks[cls][:, -1][:-1])
+            knns.append(Ks[cls][:, -1][-1])
+
+        Rcs = np.array(np.split(R, c, axis=0))
+
+        pi_c = pi.reshape(c, n).T
+        mu = []
+        sigma = np.zeros((c, c))
+        for cls in range(c):
+            mu.append(np.dot((tc[:, cls] - pi_c[:, cls]).T, kns[cls]))
+            f = np.dot(Ecs[cls], kns[cls])
+            g = np.dot(Ecs[cls], np.dot(Rcs[cls], np.linalg.solve(M.T, np.linalg.solve(M, np.dot(Rcs[cls].T, f)))))
+            '''
+            for _cls in range(c):
+                sigma[cls][_cls] = np.dot(g.T, kns[_cls])
+            '''
+            sigma[cls, :] = np.dot(kns, g)
+            sigma[cls][cls] += knns[cls] - np.dot(f.T, kns[cls])
+        mu = np.array(mu)
         ############
 
         # Do not modify below lines.
