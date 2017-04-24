@@ -12,7 +12,7 @@ class GaussianProcessMultiClassifier:
         self.legalLabels = legal_labels
         self.numpRng = np.random.RandomState(seed)
         self.numsamples = numsamples
-        self.posteriors = []    # Log posteriors are stored for later data analysis.
+        self.posteriors = []  # Log posteriors are stored for later data analysis.
 
     @staticmethod
     def softmax(x):
@@ -35,7 +35,7 @@ class GaussianProcessMultiClassifier:
         self.hypSize = [c, 2]
         self.hyp = np.zeros(self.hypSize)
         for i in range(c):
-            self.hyp[i, :] = np.array([np.log(noise)/2, np.log(noise/4)/2])
+            self.hyp[i, :] = np.array([np.log(noise) / 2, np.log(noise / 4) / 2])
 
     def train(self, trainingData, trainingLabels):
         """
@@ -64,6 +64,7 @@ class GaussianProcessMultiClassifier:
 
         Do not modify this method.
         """
+
         def sq_dist(a, b=None):
             D, n = np.shape(a)
             if b is None:
@@ -76,28 +77,28 @@ class GaussianProcessMultiClassifier:
                 if d != D:
                     print('Error: column lengths must agree.')
                     sys.exit(1)
-                mu = (m/(n+m))*np.mean(b, 1) + (n/(n+m))*np.mean(a, 1)
+                mu = (m / (n + m)) * np.mean(b, 1) + (n / (n + m)) * np.mean(a, 1)
                 a = (a.T - mu).T
                 b = (b.T - mu).T
-            return np.tile(np.sum(a*a, 0), [m, 1]).T + np.tile(np.sum(b*b, 0), [n, 1]) - 2 * a.T.dot(b)
+            return np.tile(np.sum(a * a, 0), [m, 1]).T + np.tile(np.sum(b * b, 0), [n, 1]) - 2 * a.T.dot(b)
 
         xeqz = z is None
         ell = np.exp(hyp[0])
         sf2 = np.exp(2 * hyp[1])
         if xeqz:
-            K = sq_dist(x.T/ell)
+            K = sq_dist(x.T / ell)
         else:
-            K = sq_dist(x.T/ell, z.T/ell)
+            K = sq_dist(x.T / ell, z.T / ell)
         if i is not None:
             if i == 0:
-                K = sf2 * np.exp(-K/2) * K
+                K = sf2 * np.exp(-K / 2) * K
             elif i == 1:
-                K = 2 * sf2 * np.exp(-K/2)
+                K = 2 * sf2 * np.exp(-K / 2)
             else:
                 print('Unkown parameter!')
                 sys.exit(1)
         else:
-            K = sf2 * np.exp(-K/2)
+            K = sf2 * np.exp(-K / 2)
         return K
 
     def calculate_covariance(self, trainingData, hyp):
@@ -123,7 +124,7 @@ class GaussianProcessMultiClassifier:
             t.append(temp)
         ttot = np.concatenate(t)
         tc = np.reshape(ttot, [n, c])
-        ttot = np.reshape(tc.T, [n*c, 1])
+        ttot = np.reshape(tc.T, [n * c, 1])
 
         return ttot, tc
 
@@ -165,25 +166,32 @@ class GaussianProcessMultiClassifier:
         """
         ############
         t = t[:, 0]
-        a = np.zeros(c*n)
-        converge = -np.inf
+        a = np.zeros(c * n)
+        converge = np.inf
         while True:
             valuesForModes, valuesForDerivatives, valuesForPrediction = self.calculate_intermediate_values(t, a, Kcs)
             b = valuesForModes[1]
             K = valuesForModes[3]
             logdet = valuesForModes[2]
             a = np.dot(K, b)
+            '''
             _a = np.exp(a.reshape(c, n).T)
             log_sum = np.log(_a.sum(axis=1)).sum()
-            objective = -0.5*np.dot(b.T, a) + np.dot(t.T, a) - log_sum
-            print(abs(objective-converge))
-            if abs(objective-converge) < 1e-5:
+            objective = -0.5 * np.dot(b.T, a) + np.dot(t.T, a) - log_sum
+            '''
+            _a = np.exp(a).reshape((c, -1))
+            _a_logsums = np.log(np.sum(_a, 1))
+            logsum = np.sum(_a_logsums)
+            objective = -0.5 * np.dot(b.T, a) + np.dot(t.T, a) - logsum
+            #print(abs(objective-converge))
+            if abs(objective - converge) < 1e-5:
                 break
             else:
                 converge = objective
         ############
         Z = objective - logdet
-        return a, Z # Do not modify this line.
+
+        return a, Z  # Do not modify this line.
 
     def calculate_intermediate_values(self, t, a, Kcs):
         """
@@ -197,8 +205,8 @@ class GaussianProcessMultiClassifier:
         ############
         _a = a.reshape(c, n)
         pi_c = np.exp(_a - np.amax(_a, axis=0))
-        pi_c = pi_c/pi_c.sum(axis=0)
-        pi = pi_c.reshape(c*n)
+        pi_c = pi_c / pi_c.sum(axis=0)
+        pi = pi_c.reshape(c * n)
         pi_c = pi_c.T
 
         K = self.block_diag(Kcs)
@@ -216,7 +224,6 @@ class GaussianProcessMultiClassifier:
             Ecs.append(Ec)
             _M += Ec
             logdet += np.sum(np.log(np.diag(L)))
-            logdet += np.sum(np.diag(L))
         M = np.linalg.cholesky(_M)
         E = self.block_diag(Ecs)
         logdet += np.sum(np.log(np.diag(M)))
@@ -259,15 +266,16 @@ class GaussianProcessMultiClassifier:
         pi_c = pi.reshape(c, n).T
         mu = []
         sigma = np.zeros((c, c))
-        for cls in range(c):
-            mu.append(np.dot((tc[:, cls] - pi_c[:, cls]).T, kns[cls]))
-            f = np.dot(Ecs[cls], kns[cls])
-            g = np.dot(Ecs[cls], np.dot(Rcs[cls], np.linalg.solve(M.T, np.linalg.solve(M, np.dot(Rcs[cls].T, f)))))
-
-            for _cls in range(c):
-                sigma[cls][_cls] = np.dot(g.T, kns[_cls])
-
-            sigma[cls][cls] += knns[cls] - np.dot(f.T, kns[cls])
+        for _cls in range(c):
+            mu.append(np.dot((tc[:, _cls] - pi_c[:, _cls]).T, kns[_cls]))
+            f = np.dot(Ecs[_cls], kns[_cls])
+            g = np.dot(Ecs[_cls], np.dot(Rcs[_cls], np.linalg.solve(M.T, np.linalg.solve(M, np.dot(Rcs[_cls].T, f)))))
+            '''
+            for __cls in range(c):
+                sigma[_cls][__cls] = np.dot(g.T, kns[__cls])
+            '''
+            sigma[_cls, :] = np.dot(kns, g)
+            sigma[_cls][_cls] += (knns[_cls] - np.dot(f.T, kns[_cls]))
         mu = np.array(mu)
         ############
 
@@ -308,10 +316,12 @@ class Datum:
     The contents of the representation can be accessed directly
     via the getPixel and getPixels methods.
     """
+
     def __init__(self, data, width, height):
         """
         Create a new datum from file input (standard MNIST encoding).
         """
+
         def convertToInteger(data):
             def IntegerConversionFunction(character):
                 if character == ' ':
@@ -454,9 +464,13 @@ def main():
     # Load the data
     print("Loading the data")
 
-    trainingData = feature_data_to_array(map(basic_feature_extractor, load_datafile("./data/digit_image_train_100.csv", DIGIT_DATUM_WIDTH, DIGIT_DATUM_HEIGHT)))
+    trainingData = feature_data_to_array(map(basic_feature_extractor,
+                                             load_datafile("./data/digit_image_train_100.csv", DIGIT_DATUM_WIDTH,
+                                                           DIGIT_DATUM_HEIGHT)))
     trainingLabels = load_labelsfile("./data/digit_label_train_100.csv")
-    validationData = feature_data_to_array(map(basic_feature_extractor, load_datafile("./data/digit_image_validation_100.csv", DIGIT_DATUM_WIDTH, DIGIT_DATUM_HEIGHT)))
+    validationData = feature_data_to_array(map(basic_feature_extractor,
+                                               load_datafile("./data/digit_image_validation_100.csv", DIGIT_DATUM_WIDTH,
+                                                             DIGIT_DATUM_HEIGHT)))
     validationLabels = load_labelsfile("./data/digit_label_validation_100.csv")
 
     # Conduct training and validating
@@ -465,7 +479,8 @@ def main():
     print("Validating")
     guesses = classifier.classify(validationData)
     correct = [guesses[i] == validationLabels[i] for i in range(len(validationLabels))].count(True)
-    print(str(correct), ("correct out of " + str(len(validationLabels)) + " (%.1f%%).") % (100.0 * correct / len(validationLabels)))
+    print(str(correct),
+          ("correct out of " + str(len(validationLabels)) + " (%.1f%%).") % (100.0 * correct / len(validationLabels)))
 
 
 if __name__ == "__main__":
@@ -473,6 +488,7 @@ if __name__ == "__main__":
     DIGIT_DATUM_HEIGHT = 28
 
     import time
+
     st = time.time()
 
     main()
