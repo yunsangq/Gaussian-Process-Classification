@@ -167,30 +167,24 @@ class GaussianProcessMultiClassifier:
         ############
         t = t[:, 0]
         a = np.zeros(c * n)
-        converge = np.inf
+        converge = 0.0
         while True:
-            valuesForModes, valuesForDerivatives, valuesForPrediction = self.calculate_intermediate_values(t, a, Kcs)
-            b = valuesForModes[1]
-            K = valuesForModes[3]
-            logdet = valuesForModes[2]
+            [_, b, logdet, K], _, _ = self.calculate_intermediate_values(t, a, Kcs)
+            b = b.reshape(c*n)
             a = np.dot(K, b)
-            '''
+
             _a = np.exp(a.reshape(c, n).T)
             log_sum = np.log(_a.sum(axis=1)).sum()
             objective = -0.5 * np.dot(b.T, a) + np.dot(t.T, a) - log_sum
-            '''
-            _a = np.exp(a).reshape((c, -1))
-            _a_logsums = np.log(np.sum(_a, 1))
-            logsum = np.sum(_a_logsums)
-            objective = -0.5 * np.dot(b.T, a) + np.dot(t.T, a) - logsum
-            #print(abs(objective-converge))
-            if abs(objective - converge) < 1e-5:
+
+            if np.allclose(objective, converge):
                 break
             else:
                 converge = objective
         ############
-        Z = objective - logdet
-
+        Z = np.zeros((1, 1))
+        Z[0][0] = objective - logdet
+        a = a.reshape(c*n, 1)
         return a, Z  # Do not modify this line.
 
     def calculate_intermediate_values(self, t, a, Kcs):
@@ -203,6 +197,8 @@ class GaussianProcessMultiClassifier:
         c = len(self.legalLabels)
 
         ############
+        t = t.reshape(c*n)
+        a = a.reshape(c*n)
         _a = a.reshape(c, n)
         pi_c = np.exp(_a - np.amax(_a, axis=0))
         pi_c = pi_c / pi_c.sum(axis=0)
@@ -214,17 +210,15 @@ class GaussianProcessMultiClassifier:
 
         logdet = 0.0
         Ecs = []
-        _M = np.zeros((n, n))
         prob = []
         for cls in range(c):
             Dc = np.diag(pi_c[:, cls])
             prob.append(Dc)
-            L = np.linalg.cholesky(np.identity(n) + np.dot(np.sqrt(Dc), np.dot(Kcs[cls], np.sqrt(Dc))))
+            L = np.linalg.cholesky(np.identity(n) + np.dot(np.dot(np.sqrt(Dc), Kcs[cls]), np.sqrt(Dc)))
             Ec = np.dot(np.sqrt(Dc), np.linalg.solve(L.T, np.linalg.solve(L, np.sqrt(Dc))))
             Ecs.append(Ec)
-            _M += Ec
             logdet += np.sum(np.log(np.diag(L)))
-        M = np.linalg.cholesky(_M)
+        M = np.linalg.cholesky(sum(Ecs))
         E = self.block_diag(Ecs)
         logdet += np.sum(np.log(np.diag(M)))
 
@@ -236,7 +230,8 @@ class GaussianProcessMultiClassifier:
         d = np.dot(np.dot(E, K), _c)
         b = _c - d + np.dot(E, np.dot(R, np.linalg.solve(M.T, np.linalg.solve(M, np.dot(R.T, d)))))
         ############
-
+        b = b.reshape(c*n, 1)
+        pi = pi.reshape(c*n, 1)
         # Do not modify below lines.
         valuesForModes = [W, b, logdet, K]
         valuesForDerivatives = [E, M, R, b, pi, K]
@@ -266,16 +261,19 @@ class GaussianProcessMultiClassifier:
         pi_c = pi.reshape(c, n).T
         mu = []
         sigma = np.zeros((c, c))
-        for _cls in range(c):
-            mu.append(np.dot((tc[:, _cls] - pi_c[:, _cls]).T, kns[_cls]))
-            f = np.dot(Ecs[_cls], kns[_cls])
-            g = np.dot(Ecs[_cls], np.dot(Rcs[_cls], np.linalg.solve(M.T, np.linalg.solve(M, np.dot(Rcs[_cls].T, f)))))
-            '''
-            for __cls in range(c):
-                sigma[_cls][__cls] = np.dot(g.T, kns[__cls])
-            '''
-            sigma[_cls, :] = np.dot(kns, g)
-            sigma[_cls][_cls] += (knns[_cls] - np.dot(f.T, kns[_cls]))
+        for cls in range(c):
+            t_c = tc[:, cls]
+            pic = pi_c[:, cls]
+
+            mu.append(np.dot((t_c - pic).T, kns[cls]))
+            f = np.dot(Ecs[cls], kns[cls])
+            x1 = np.linalg.solve(M, np.dot(Rcs[cls].T, f))
+            x2 = np.linalg.solve(M.T, x1)
+            g = np.dot(Rcs[cls], x2)
+            g = np.dot(Ecs[cls], g)
+
+            sigma[cls, :] = np.dot(kns, g)
+            sigma[cls][cls] += knns[cls] - np.dot(f.T, kns[cls])
         mu = np.array(mu)
         ############
 
